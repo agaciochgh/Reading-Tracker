@@ -11,8 +11,10 @@ A cheerful reading tracker for kids. One profile per reader, with daily goals, s
 - **Bookshelf:** Reading / Wishlist / Finished. Book search uses Open Library for titles, authors, page counts and covers. If there's no network, or no cover, the book gets a colourful generated cover instead.
 - **Finish a book:** rate it with stars, then confetti.
 - **18 badges:** streaks, total time, pages, books finished, weekend reading and more, each with a progress bar.
-- **Stats:** totals, a 15-week reading calendar, and full history. Entries can be deleted.
-- **Parent settings:** manage readers, export/import a JSON backup, load demo data, erase everything.
+- **Stats by week, month and year:** time, days read, pages, books finished, a chart, and a comparison with the same point in the previous period. Arrows step back through past periods. **All time** adds totals, a 15-week reading calendar and full history.
+- **Family sync (optional):** sign in with one family account on every device and they all stay in step, even after being offline. See [SYNC-SETUP.md](SYNC-SETUP.md).
+- **Parent PIN:** locks Parent settings and deleting things. It syncs across devices, and a grown-up question gets you in if you forget it.
+- **Parent settings:** manage readers, sync, PIN, export/import a JSON backup, load demo data, erase everything.
 - Installable as an app (PWA), works offline, supports dark mode, and fits phones, tablets and desktops.
 
 ## Running it
@@ -29,7 +31,7 @@ To put it on your kids' tablets, host it on **GitHub Pages** (Settings → Pages
 
 ## Data & privacy
 
-Everything is stored in the browser's `localStorage` on each device. Nothing is sent anywhere except book-search queries to openlibrary.org. Each device keeps its own data; use **Parent settings → Export/Import** to move or back it up.
+Each device keeps its data in the browser's `localStorage`. Without sync, nothing leaves the device except book-search queries to openlibrary.org. With family sync turned on, data is also stored in your own Firebase project, where only your family account can read it (see `firestore.rules`). It's kept until you delete it. **Parent settings → Export** saves a backup file at any time.
 
 ## Files
 
@@ -37,6 +39,9 @@ Everything is stored in the browser's `localStorage` on each device. Nothing is 
 | --- | --- |
 | `index.html` | App shell |
 | `styles.css` | All styling (light/dark themes, per-kid accent colour) |
-| `app.js` | State, rendering, timer, badges, search, backup |
+| `app.js` | State, rendering, timer, badges, stats, PIN, search, backup |
+| `sync.js` | Family sync via Firebase Auth + Firestore |
+| `sync-config.js` | Your Firebase project settings (`null` = sync off) |
+| `firestore.rules` | Database security rules to paste into Firebase |
 | `sw.js` | Offline cache |
 | `manifest.webmanifest`, `icon.svg` | Install-as-app metadata and icon |

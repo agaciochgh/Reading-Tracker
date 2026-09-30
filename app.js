@@ -51,7 +51,7 @@ const fmtDate = (k) => {
 // State
 // ---------------------------------------------------------------------------
 function blankState() {
-  return { version: 1, kids: [], books: [], sessions: [], activeKidId: null, timer: null };
+  return { version: 1, kids: [], books: [], sessions: [], settings: {}, activeKidId: null, timer: null };
 }
 
 function load() {
@@ -73,15 +73,20 @@ function normalize(s) {
     kids: Array.isArray(s.kids) ? s.kids : [],
     books: Array.isArray(s.books) ? s.books : [],
     sessions: Array.isArray(s.sessions) ? s.sessions : [],
+    settings: s.settings && typeof s.settings === 'object' ? s.settings : {},
   };
 }
 
 let state = load();
 // With several readers sharing a device, start on "Who's reading?".
-const ui = { tab: 'home', bookFilter: 'reading', picking: state.kids.length > 1, modal: null };
+const ui = {
+  tab: 'home', bookFilter: 'reading', picking: state.kids.length > 1, modal: null,
+  statsRange: 'week', statsOffset: 0, unlockedUntil: 0,
+};
 
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch { /* storage full or blocked */ }
+  Sync.push();
 }
 
 const kid = () => state.kids.find((k) => k.id === state.activeKidId) || null;
@@ -212,21 +217,26 @@ function ringHTML(value, goal) {
   </div>`;
 }
 
-function weekHTML(k, byDay) {
-  const goal = k.dailyGoal || 20;
-  const days = Array.from({ length: 7 }, (_, i) => addDays(new Date(), i - 6));
-  const vals = days.map((d) => byDay[dayKey(d)] || 0);
-  const max = Math.max(goal * 1.25, ...vals);
-  const cols = days.map((d, i) => {
-    const v = vals[i];
-    const h = v / max;
-    const cls = v >= goal ? 'met' : v > 0 ? 'on' : '';
-    return `<div class="col"><div class="bar ${cls}" style="height:calc((100% - 24px) * ${h})">${v ? `<span class="v">${v}</span>` : ''}</div>
-      <div class="day ${i === 6 ? 'today' : ''}">${DAY_LETTERS[d.getDay()]}</div></div>`;
+/** Bar chart. items: [{ label, value, title, today, future }]; goal draws a dashed line and turns bars green. */
+function barChart(items, { goal = 0, fmt = String, showValues = true } = {}) {
+  const max = Math.max(goal * 1.25, ...items.map((it) => it.value), 1);
+  const cols = items.map((it) => {
+    const cls = it.future ? 'future' : goal && it.value >= goal ? 'met' : it.value > 0 ? 'on' : '';
+    return `<div class="col" title="${esc(it.title || '')}"><div class="bar ${cls}" style="height:calc((100% - 24px) * ${it.value / max})">${showValues && it.value ? `<span class="v">${esc(fmt(it.value))}</span>` : ''}</div>
+      <div class="day ${it.today ? 'today' : ''}">${esc(it.label)}</div></div>`;
   }).join('');
-  // Bars sit above a 24px day-label strip, so the goal line uses the same scale.
-  const goalBottom = `calc(24px + (100% - 24px) * ${goal / max})`;
-  return `<div class="week"><div class="goal-line" style="bottom:${goalBottom}"><span>Goal</span></div>${cols}</div>`;
+  // Bars sit above a 24px label strip, so the goal line uses the same scale.
+  const line = goal ? `<div class="goal-line" style="bottom:calc(24px + (100% - 24px) * ${goal / max})"><span>Goal</span></div>` : '';
+  return `<div class="week ${items.length > 12 ? 'dense' : ''}" style="grid-template-columns:repeat(${items.length},1fr)">${line}${cols}</div>`;
+}
+
+function weekHTML(k, byDay) {
+  const items = Array.from({ length: 7 }, (_, i) => {
+    const d = addDays(new Date(), i - 6);
+    const v = byDay[dayKey(d)] || 0;
+    return { label: DAY_LETTERS[d.getDay()], value: v, title: `${fmtDate(dayKey(d))}: ${v} min`, today: i === 6 };
+  });
+  return barChart(items, { goal: k.dailyGoal || 20 });
 }
 
 function heatHTML(k, byDay) {
@@ -294,6 +304,7 @@ function welcomeHTML() {
     <h1>Reading Quest</h1>
     <p class="lead">Track books, build streaks, and earn badges.<br/>Let's add your first reader!</p>
     <button class="btn btn-primary btn-block" data-action="add-kid">${ICONS.plus} Add a reader</button>
+    ${Sync.enabled ? `<button class="btn btn-soft btn-block" style="margin-top:12px" data-action="parent">☁️ Sign in to your family account</button>` : ''}
     <p class="hint" style="margin-top:18px">Already have a backup? <a href="#" data-action="import" style="color:var(--accent)">Import it</a></p>
   </div></div>`;
 }
@@ -403,7 +414,137 @@ function badgesHTML(k, st) {
     </div>`;
 }
 
+const MONTH_LETTERS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+const RANGE_NAMES = { week: 'week', month: 'month', year: 'year' };
+
+/** The week (Sun–Sat), month or year that is `offset` periods away from the current one. */
+function periodRange(range, offset) {
+  const now = new Date();
+  const short = (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  let start, end, label, sub = '';
+  if (range === 'week') {
+    start = addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -now.getDay() + offset * 7);
+    end = addDays(start, 6);
+    sub = `${short(start)} – ${short(end)}`;
+    label = offset === 0 ? 'This week' : offset === -1 ? 'Last week' : sub;
+    if (offset < -1) sub = String(start.getFullYear());
+  } else if (range === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+    label = start.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    sub = offset === 0 ? 'This month' : offset === -1 ? 'Last month' : '';
+  } else {
+    start = new Date(now.getFullYear() + offset, 0, 1);
+    end = new Date(start.getFullYear(), 11, 31);
+    label = String(start.getFullYear());
+    sub = offset === 0 ? 'This year' : offset === -1 ? 'Last year' : '';
+  }
+  return { range, start, end, startKey: dayKey(start), endKey: dayKey(end), label, sub };
+}
+
+function periodStats(k, p) {
+  const goal = k.dailyGoal || 20;
+  const sessions = kidSessions(k.id).filter((s) => s.date >= p.startKey && s.date <= p.endKey);
+  const byDay = {};
+  for (const s of sessions) byDay[s.date] = (byDay[s.date] || 0) + (s.minutes || 0);
+  const daily = Object.values(byDay).filter((m) => m > 0);
+  const todayKey = dayKey();
+  const lastKey = p.endKey < todayKey ? p.endKey : todayKey;
+  const daysSoFar = lastKey < p.startKey ? 0 : Math.round((parseKey(lastKey) - parseKey(p.startKey)) / 864e5) + 1;
+  const books = kidBooks(k.id).filter((b) => {
+    if (b.status !== 'finished' || !b.finishedAt) return false;
+    const d = dayKey(new Date(b.finishedAt));
+    return d >= p.startKey && d <= p.endKey;
+  });
+  return {
+    sessions, byDay, books, daysSoFar,
+    minutes: sessions.reduce((a, s) => a + (s.minutes || 0), 0),
+    pages: sessions.reduce((a, s) => a + (s.pages || 0), 0),
+    daysRead: daily.length,
+    goalDays: daily.filter((m) => m >= goal).length,
+    bestDay: Math.max(0, ...daily),
+    avg: daily.length ? Math.round(daily.reduce((a, m) => a + m, 0) / daily.length) : 0,
+  };
+}
+
+function periodChart(k, p, ps) {
+  const today = dayKey();
+  if (p.range === 'year') {
+    const byMonth = Array(12).fill(0);
+    for (const [d, m] of Object.entries(ps.byDay)) byMonth[parseKey(d).getMonth()] += m;
+    const items = byMonth.map((v, i) => {
+      const first = new Date(p.start.getFullYear(), i, 1);
+      return {
+        label: MONTH_LETTERS[i], value: v, future: dayKey(first) > today,
+        today: dayKey(first).slice(0, 7) === today.slice(0, 7),
+        title: `${first.toLocaleDateString(undefined, { month: 'long' })}: ${fmtMinutes(v)}`,
+      };
+    });
+    return { title: 'Reading time per month', html: barChart(items, { fmt: (v) => (v >= 60 ? `${Math.round(v / 60)}h` : `${v}m`) }) };
+  }
+  const items = [];
+  for (let d = new Date(p.start); d <= p.end; d = addDays(d, 1)) {
+    const key = dayKey(d);
+    const v = ps.byDay[key] || 0;
+    const label = p.range === 'week' ? DAY_LETTERS[d.getDay()] : d.getDate() === 1 || d.getDate() % 5 === 0 ? String(d.getDate()) : '';
+    items.push({ label, value: v, today: key === today, future: key > today, title: `${fmtDate(key)}: ${v} min` });
+  }
+  return { title: 'Minutes per day', html: barChart(items, { goal: k.dailyGoal || 20, showValues: p.range === 'week' }) };
+}
+
 function statsHTML(k, st) {
+  const ranges = [['week', 'Week'], ['month', 'Month'], ['year', 'Year'], ['all', 'All time']];
+  const seg = `<div class="seg">${ranges.map(([id, label]) =>
+    `<button class="${ui.statsRange === id ? 'on' : ''}" data-action="stats-range" data-range="${id}">${label}</button>`).join('')}</div>`;
+  if (ui.statsRange === 'all') return seg + allTimeHTML(k, st);
+
+  const p = periodRange(ui.statsRange, ui.statsOffset);
+  const ps = periodStats(k, p);
+  // For the period still in progress, compare with the same stretch of the previous one (e.g. Sun–Wed vs Sun–Wed).
+  const prevRange = periodRange(ui.statsRange, ui.statsOffset - 1);
+  const partial = ui.statsOffset === 0;
+  if (partial) prevRange.endKey = [prevRange.endKey, dayKey(addDays(prevRange.start, ps.daysSoFar - 1))].sort()[0];
+  const prev = periodStats(k, prevRange);
+  const vs = partial ? `this point last ${RANGE_NAMES[ui.statsRange]}` : `last ${RANGE_NAMES[ui.statsRange]}`;
+  const name = RANGE_NAMES[ui.statsRange];
+  let delta = '';
+  if (prev.minutes && ps.minutes) {
+    const pct = Math.round(((ps.minutes - prev.minutes) / prev.minutes) * 100);
+    delta = pct >= 0
+      ? `<span class="delta up">▲ ${pct}% more than ${vs}</span>`
+      : `<span class="delta down">▼ ${-pct}% less than ${vs}</span>`;
+  }
+  const chart = periodChart(k, p, ps);
+  const sessions = ps.sessions.slice().sort((a, b) => (b.date + (b.createdAt || '')).localeCompare(a.date + (a.createdAt || '')));
+  return `${seg}
+    <div class="period-nav">
+      <button class="icon-btn" data-action="stats-shift" data-by="-1" aria-label="Previous ${name}">‹</button>
+      <div class="pl"><div class="pt">${esc(p.label)}</div>${p.sub ? `<div class="ps">${esc(p.sub)}</div>` : ''}</div>
+      <button class="icon-btn" data-action="stats-shift" data-by="1" aria-label="Next ${name}" ${ui.statsOffset >= 0 ? 'disabled' : ''}>›</button>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="ic">⏱️</div><div class="n">${fmtMinutes(ps.minutes)}</div><div class="l">Time reading</div></div>
+      <div class="tile"><div class="ic">📅</div><div class="n">${ps.daysRead}<small> / ${ps.daysSoFar}</small></div><div class="l">Days read</div></div>
+      <div class="tile"><div class="ic">📄</div><div class="n">${ps.pages.toLocaleString()}</div><div class="l">Pages read</div></div>
+      <div class="tile"><div class="ic">📚</div><div class="n">${ps.books.length}</div><div class="l">Books finished</div></div>
+    </div>
+    <section class="card">
+      <div class="chart-head"><h3>${chart.title}</h3>${delta}</div>
+      ${chart.html}
+      <div class="facts">
+        <span>🎯 Goal hit on <b>${plural(ps.goalDays, 'day')}</b></span>
+        <span>🏅 Best day <b>${fmtMinutes(ps.bestDay)}</b></span>
+        <span>📈 Average <b>${fmtMinutes(ps.avg)}</b> a reading day</span>
+      </div>
+    </section>
+    ${ps.books.length ? `<div class="section-title"><h2>Books finished</h2></div><div class="shelf">${ps.books.map(bookCard).join('')}</div>` : ''}
+    <div class="section-title"><h2>Reading log</h2></div>
+    <section class="card list" style="padding:6px 20px">
+      ${sessions.length ? sessions.slice(0, 100).map(sessionRow).join('') : `<div class="empty"><div class="big">🗓️</div><p>No reading logged this ${name}.</p></div>`}
+    </section>`;
+}
+
+function allTimeHTML(k, st) {
   const sessions = kidSessions(k.id).slice().sort((a, b) => (b.date + (b.createdAt || '')).localeCompare(a.date + (a.createdAt || '')));
   return `
     <div class="tiles">
@@ -429,6 +570,7 @@ function openModal(type, data = {}) {
 }
 
 function closeModal() {
+  if (ui.modal?.type === 'parent') ui.unlockedUntil = 0; // leaving Parent settings locks it again
   ui.modal = null;
   $('#modal-root').innerHTML = '';
 }
@@ -437,9 +579,11 @@ function renderModal() {
   const m = ui.modal;
   const root = $('#modal-root');
   if (!m) { root.innerHTML = ''; return; }
-  const body = MODALS[m.type](m);
-  root.innerHTML = `<div class="modal-backdrop" data-action="backdrop"><div class="modal" role="dialog" aria-modal="true">
-    <div class="grip"></div>${body}</div></div>`;
+  const body = `<div class="grip"></div>${MODALS[m.type](m)}`;
+  const open = root.querySelector('.modal');
+  // Already showing a sheet: swap its contents so it doesn't replay the open animation.
+  if (open) open.innerHTML = body;
+  else root.innerHTML = `<div class="modal-backdrop" data-action="backdrop"><div class="modal" role="dialog" aria-modal="true">${body}</div></div>`;
   const auto = root.querySelector('[autofocus]');
   if (auto && matchMedia('(min-width: 600px)').matches) auto.focus();
 }
@@ -587,8 +731,16 @@ const MODALS = {
         </div>
         <button class="btn btn-soft btn-block" style="margin-top:8px" data-action="add-kid">${ICONS.plus} Add a reader</button>
       </div>
+      ${syncSectionHTML()}
+      <div class="field"><span class="label">Parent PIN</span>
+        ${state.settings.pinHash
+          ? `<p class="hint" style="margin:0 0 10px">🔒 These settings, and deleting books or reading history, need your PIN.</p>
+            <div class="row"><button class="btn btn-soft" data-action="pin-set">Change PIN</button><button class="btn btn-soft" data-action="pin-off">Turn off PIN</button></div>`
+          : `<p class="hint" style="margin:0 0 10px">Lock these settings with a 4-digit PIN so kids can't change goals or delete things.</p>
+            <button class="btn btn-soft btn-block" data-action="pin-set">🔒 Set a PIN</button>`}
+      </div>
       <div class="field"><span class="label">Backup</span>
-        <p class="hint" style="margin:0 0 10px">Reading data is saved on this device only. Export a backup to move it to another device or keep it safe.</p>
+        <p class="hint" style="margin:0 0 10px">${Sync.status === 'synced' || Sync.status === 'syncing' ? 'Your data is also saved in your family account.' : 'Reading data is saved on this device only.'} Export a backup file to keep an extra copy.</p>
         <div class="row">
           <button class="btn btn-soft" data-action="export">⬇️ Export</button>
           <button class="btn btn-soft" data-action="import">⬆️ Import</button>
@@ -599,7 +751,114 @@ const MODALS = {
       </div>
       <button class="btn btn-danger btn-block" data-action="reset">Erase everything</button>`;
   },
+
+  pin(m) {
+    const titles = { check: 'Grown-ups only 🔒', set: 'Choose a 4-digit PIN', confirm: 'Type the PIN again' };
+    const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', m.mode === 'check' ? 'forgot' : '', '0', 'back'];
+    return `${head(titles[m.mode])}
+      <div class="pin-dots ${m.error ? 'shake' : ''}">${[0, 1, 2, 3].map((i) => `<i class="${i < m.entry.length ? 'on' : ''}"></i>`).join('')}</div>
+      <p class="pin-msg ${m.error ? 'err' : ''}">${esc(m.error || (m.mode === 'check' ? 'Type the parent PIN' : m.mode === 'set' ? "Pick something the kids won't guess" : 'Just to be sure'))}</p>
+      <div class="keypad">
+        ${keys.map((k) => {
+          if (!k) return '<span></span>';
+          if (k === 'forgot') return '<button type="button" class="kp-text" data-action="pin-forgot">Forgot?</button>';
+          if (k === 'back') return '<button type="button" class="kp-text" data-action="pin-key" data-val="back" aria-label="Delete">⌫</button>';
+          return `<button type="button" data-action="pin-key" data-val="${k}">${k}</button>`;
+        }).join('')}
+      </div>`;
+  },
+
+  gate(m) {
+    return `${head('Grown-up check')}
+      <form data-form="gate">
+        <p style="color:var(--ink-2);font-weight:700;margin:0 0 14px">Forgot the PIN? Answer this to get in, then set a new PIN in Parent settings.</p>
+        <div class="field"><label for="gate-answer">What is ${m.a} × ${m.b}?</label>
+          <input id="gate-answer" class="input" name="answer" type="number" inputmode="numeric" autocomplete="off" autofocus /></div>
+        ${m.error ? `<p class="pin-msg err" style="text-align:left">${esc(m.error)}</p>` : ''}
+        <div class="modal-foot"><button class="btn btn-primary">Continue</button></div>
+      </form>`;
+  },
 };
+
+function syncSectionHTML() {
+  const label = '<span class="label">Family sync</span>';
+  if (!Sync.enabled) {
+    return `<div class="field">${label}<p class="hint" style="margin:0">☁️ Sync is off, so each device keeps its own data. To share reading across tablets and phones, set up a free Firebase project once (see <b>SYNC-SETUP.md</b> in the project).</p></div>`;
+  }
+  const st = Sync.status;
+  if (st === 'loading') return `<div class="field">${label}<div class="spinner"></div></div>`;
+  if (st === 'signed-out' || (st === 'error' && !Sync.email)) {
+    return `<div class="field">${label}
+      <p class="hint" style="margin:0 0 10px">Sign in with your family account on every device and reading stays in sync everywhere.</p>
+      <form data-form="signin" class="stack">
+        <input class="input" name="email" type="email" autocomplete="username" placeholder="Family email" value="${esc(ui.syncEmail || '')}" required />
+        <input class="input" name="password" type="password" autocomplete="current-password" placeholder="Password (6+ characters)" required minlength="6" />
+        ${ui.syncMsg ? `<p class="pin-msg ${ui.syncMsgErr ? 'err' : ''}" style="text-align:left;margin:0">${esc(ui.syncMsg)}</p>` : ''}
+        <div class="row">
+          <button class="btn btn-primary" ${ui.syncBusy ? 'disabled' : ''}>Sign in</button>
+          <button type="button" class="btn btn-soft" data-action="sync-signup" ${ui.syncBusy ? 'disabled' : ''}>Create account</button>
+        </div>
+        <button type="button" class="link-btn" data-action="sync-reset">Forgot password?</button>
+      </form></div>`;
+  }
+  const chip = st === 'error'
+    ? `<span class="sync-chip err">⚠️ ${esc(Sync.error)}</span>`
+    : st === 'synced' ? '<span class="sync-chip ok">✅ All synced</span>' : '<span class="sync-chip">🔄 Syncing…</span>';
+  return `<div class="field">${label}
+    <div class="list-item" style="border:0;padding-top:0"><div class="dot">☁️</div>
+      <div class="grow"><div class="t">${esc(Sync.email)}</div><div class="s">${chip}</div></div>
+      <button class="btn btn-soft" style="padding:8px 14px" data-action="sync-signout">Sign out</button></div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Parent PIN (a kid-proof lock, not real security: it lives in the family's own data)
+// ---------------------------------------------------------------------------
+const PIN_UNLOCK_MS = 3 * 60 * 1000;
+
+function pinHash(pin, salt) {
+  let h = 2166136261;
+  for (const c of `${salt}:${pin}`) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+
+/** Run fn now if there's no PIN (or it was entered recently), otherwise ask for it first. */
+function requirePin(fn) {
+  if (!state.settings.pinHash || Date.now() < ui.unlockedUntil) return fn();
+  openModal('pin', { mode: 'check', entry: '', then: fn });
+}
+
+function unlock(then) {
+  ui.unlockedUntil = Date.now() + PIN_UNLOCK_MS;
+  closeModal();
+  then?.();
+}
+
+function pinKey(key) {
+  const m = ui.modal;
+  if (key === 'back') { m.entry = m.entry.slice(0, -1); m.error = ''; renderModal(); return; }
+  if (m.entry.length >= 4) return;
+  m.entry += key;
+  m.error = '';
+  if (m.entry.length < 4) { renderModal(); return; }
+  if (m.mode === 'check') {
+    if (pinHash(m.entry, state.settings.pinSalt) === state.settings.pinHash) { unlock(m.then); return; }
+    Object.assign(m, { entry: '', error: 'Not quite. Try again!' });
+  } else if (m.mode === 'set') {
+    Object.assign(m, { first: m.entry, entry: '', mode: 'confirm' });
+  } else if (m.first === m.entry) {
+    const salt = uid();
+    state.settings = { ...state.settings, pinSalt: salt, pinHash: pinHash(m.entry, salt) };
+    ui.unlockedUntil = Date.now() + PIN_UNLOCK_MS;
+    save();
+    toast('🔒', 'PIN saved', Sync.email ? 'It works on all your synced devices' : 'Parent settings are now locked');
+    openModal('parent');
+    return;
+  } else {
+    Object.assign(m, { entry: '', mode: 'set', error: "Those didn't match. Let's try again." });
+  }
+  renderModal();
+}
 
 // ---------------------------------------------------------------------------
 // Book search (Open Library)
@@ -843,7 +1102,7 @@ const actions = {
   filter: (el) => { ui.bookFilter = el.dataset.filter; render(); },
   'switch-kid': () => { ui.picking = true; render(); },
   'choose-kid': (el) => { state.activeKidId = el.dataset.id; ui.picking = false; ui.tab = 'home'; save(); render(); },
-  parent: () => openModal('parent'),
+  parent: () => requirePin(() => openModal('parent')),
   'add-kid': () => openModal('kid'),
   'edit-kid': (el) => openModal('kid', { id: el.dataset.id }),
   'delete-kid': () => {
@@ -881,14 +1140,14 @@ const actions = {
     Object.assign(ui.modal.draft, { title: r.title, author: r.author, totalPages: r.totalPages, coverUrl: r.coverUrl });
     renderModal();
   },
-  'delete-book': (el) => {
+  'delete-book': (el) => requirePin(() => {
     const b = bookById(el.dataset.id);
     if (!confirm(`Remove "${b.title}" from the shelf? Reading time stays in your history.`)) return;
     state.books = state.books.filter((x) => x.id !== b.id);
     state.sessions.forEach((s) => { if (s.bookId === b.id) s.bookId = null; });
     closeModal();
     commit();
-  },
+  }),
   'set-status': (el) => {
     const b = bookById(el.dataset.id);
     b.status = el.dataset.status;
@@ -919,10 +1178,37 @@ const actions = {
     if (!wasFinished) { confetti(); toast('🏆', 'Book finished!', `"${b.title}" is on your finished shelf`); }
   },
   log: (el) => openModal('log', { bookId: el.dataset.book }),
-  'delete-session': (el) => {
+  'delete-session': (el) => requirePin(() => {
     if (!confirm('Delete this reading entry?')) return;
     state.sessions = state.sessions.filter((s) => s.id !== el.dataset.id);
     commit();
+  }),
+  'stats-range': (el) => { ui.statsRange = el.dataset.range; ui.statsOffset = 0; render(); },
+  'stats-shift': (el) => { ui.statsOffset = Math.min(0, ui.statsOffset + Number(el.dataset.by)); render(); },
+  'pin-key': (el) => pinKey(el.dataset.val),
+  'pin-forgot': () => {
+    const then = ui.modal.then;
+    openModal('gate', { a: 12 + Math.floor(Math.random() * 8), b: 13 + Math.floor(Math.random() * 7), then });
+  },
+  'pin-set': () => openModal('pin', { mode: 'set', entry: '' }),
+  'pin-off': () => {
+    if (!confirm('Turn off the parent PIN?')) return;
+    const { pinHash: _h, pinSalt: _s, ...rest } = state.settings;
+    state.settings = rest;
+    save();
+    renderModal();
+    toast('🔓', 'PIN turned off');
+  },
+  'sync-signup': (el) => syncAuth('signUp', el.closest('form')),
+  'sync-reset': async (el) => {
+    const email = el.closest('form').elements.email.value.trim();
+    if (!email) { setSyncMsg('Type your family email first.', true); return; }
+    try { await Sync.resetPassword(email); setSyncMsg(`Password reset email sent to ${email}.`); } catch (e) { setSyncMsg(e.message, true); }
+  },
+  'sync-signout': async () => {
+    if (!confirm('Sign out of family sync on this device? Reading already here stays on this device.')) return;
+    await Sync.signOut().catch(() => {});
+    toast('☁️', 'Signed out', 'This device no longer syncs');
   },
   'start-timer': (el) => {
     const k = kid();
@@ -961,7 +1247,8 @@ const actions = {
   import: (el, e) => { e.preventDefault(); importData(); },
   demo: () => { loadDemo(); closeModal(); commit(); toast('🎲', 'Demo readers added', 'Tap an avatar to switch readers'); },
   reset: () => {
-    if (!confirm('Erase ALL readers, books and history on this device? This cannot be undone.')) return;
+    const where = Sync.email ? 'on EVERY device signed in to your family account' : 'on this device';
+    if (!confirm(`Erase ALL readers, books and history ${where}? This cannot be undone.`)) return;
     state = blankState();
     closeModal();
     save();
@@ -969,6 +1256,32 @@ const actions = {
     renderTimer();
   },
 };
+
+function setSyncMsg(msg, isErr = false) {
+  ui.syncMsg = msg;
+  ui.syncMsgErr = isErr;
+  if (ui.modal?.type === 'parent') renderModal();
+}
+
+async function syncAuth(method, form) {
+  const email = form.elements.email.value.trim();
+  const password = form.elements.password.value;
+  ui.syncEmail = email;
+  if (!email || password.length < 6) { setSyncMsg('Type the family email and a password with 6+ characters.', true); return; }
+  ui.syncBusy = true;
+  setSyncMsg(method === 'signUp' ? 'Creating your family account…' : 'Signing in…');
+  try {
+    await Sync[method](email, password);
+    ui.syncMsg = '';
+    toast('☁️', method === 'signUp' ? 'Family account created!' : 'Signed in!', 'Reading will now sync across your devices');
+  } catch (e) {
+    ui.syncMsg = e.message;
+    ui.syncMsgErr = true;
+  } finally {
+    ui.syncBusy = false;
+    if (ui.modal?.type === 'parent') renderModal();
+  }
+}
 
 /** Keep typed values when a modal re-renders (e.g. after tapping a choice chip). */
 function syncDraftFromForm() {
@@ -1002,11 +1315,18 @@ document.addEventListener('submit', (e) => {
   const type = form.dataset.form;
   if (!type) return;
   e.preventDefault();
+  if (type === 'gate') {
+    const m = ui.modal;
+    if (Number(form.elements.answer.value) === m.a * m.b) unlock(m.then);
+    else { m.error = 'Not quite. Ask a grown-up!'; renderModal(); }
+    return;
+  }
+  if (type === 'signin') { syncAuth('signIn', form); return; }
   syncDraftFromForm();
   const d = ui.modal.draft;
 
   if (type === 'kid') {
-    const name = d.name.trim();
+    const name = (d.name || '').trim();
     if (!name) return;
     const existing = state.kids.find((x) => x.id === ui.modal.id);
     if (existing) Object.assign(existing, { name, avatar: d.avatar, color: d.color, dailyGoal: d.dailyGoal });
@@ -1057,10 +1377,25 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && ui.modal) closeModal();
+  if (ui.modal?.type === 'pin' && /^[0-9]$/.test(e.key)) pinKey(e.key);
+  if (ui.modal?.type === 'pin' && e.key === 'Backspace') pinKey('back');
 });
 
 // Refresh "today" when the app comes back after midnight or from the background.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); if (state.timer) renderTimer(); } });
+
+Sync.init({
+  get: () => state,
+  // Another device changed something: take the family's data and redraw.
+  apply: (data) => {
+    Object.assign(state, data);
+    if (state.activeKidId && !state.kids.some((k) => k.id === state.activeKidId)) state.activeKidId = null;
+    save();
+    render();
+    if (ui.modal?.type === 'parent') renderModal();
+  },
+  onStatus: () => { if (ui.modal?.type === 'parent') renderModal(); },
+});
 
 render();
 renderTimer();
