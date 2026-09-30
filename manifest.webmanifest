@@ -1,0 +1,13 @@
+{
+  "name": "Reading Quest",
+  "short_name": "Reading Quest",
+  "description": "A cheerful reading tracker for kids.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f3ff",
+  "theme_color": "#7c5cff",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
