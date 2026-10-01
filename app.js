@@ -6,6 +6,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 const STORE_KEY = 'reading-quest-v1';
+const APP_VERSION = '2026-10-01.3'; // bump with each release so parents can see which version a device runs
 const AVATARS = ['🦊', '🐼', '🦄', '🐸', '🐯', '🐙', '🦖', '🐧', '🐨', '🦁', '🐰', '🚀', '🐶', '🐱', '🦋', '🐲', '🌟', '🧚'];
 const COLORS = ['#7c5cff', '#ff5c8a', '#ff8a3d', '#12b886', '#339af0', '#e64980', '#f59f00', '#15aabf'];
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -822,7 +823,8 @@ const MODALS = {
       </div>
       <button class="btn btn-danger btn-block" data-action="reset">Erase everything</button>
       <button class="btn btn-primary btn-block" style="margin-top:12px" data-action="parent-lock">${locked ? '🔒 Lock & close settings' : 'Done'}</button>
-      ${locked ? `<p class="hint" style="text-align:center">Settings also lock on their own after ${PARENT_IDLE_MIN} minutes without a tap, or when the app is closed.</p>` : ''}`;
+      ${locked ? `<p class="hint" style="text-align:center">Settings also lock on their own after ${PARENT_IDLE_MIN} minutes without a tap, or when the app is closed.</p>` : ''}
+      <p class="hint" style="text-align:center">App version ${APP_VERSION}</p>`;
   },
 
   pin(m) {
@@ -1550,5 +1552,18 @@ Sync.init({
 render();
 renderTimer();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Check for a new version whenever the app is opened or brought back, and reload once it's installed.
+  // (If a form is open, wait until it's closed so nothing typed is lost.)
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  const reloadForUpdate = () => {
+    if (reloading) return;
+    if (ui.modal) { setTimeout(reloadForUpdate, 1000); return; }
+    reloading = true;
+    location.reload();
+  };
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadForUpdate(); });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+  }).catch(() => {});
 }
