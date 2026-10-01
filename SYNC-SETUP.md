@@ -48,6 +48,6 @@ Sync uses **Firebase**, Google's free app database. You set it up once (about 10
 
 ## Parent PIN
 
-Set it in **Parent settings → Parent PIN**. It syncs to all your devices. It protects Parent settings and deleting books or reading history. If you forget it, tap **Forgot?** and answer the grown-up maths question to get in and set a new one.
+Set it in **Parent settings → Parent PIN**. It syncs to all your devices. It protects Parent settings and deleting books or reading history. Tap **🔒 Lock** when you're done. Settings also lock by themselves after 2 minutes without a tap, or when you switch away from the app. If you forget it, tap **Forgot?** and answer the grown-up maths question to get in and set a new one.
 
 The PIN is a kid-proof lock, not bank-grade security. Your family account password is what protects the data itself.

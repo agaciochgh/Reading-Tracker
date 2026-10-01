@@ -88,7 +88,8 @@ let state = load();
 // With several readers sharing a device, start on "Who's reading?".
 const ui = {
   tab: 'home', bookFilter: 'reading', picking: state.kids.length > 1, modal: null,
-  statsRange: 'week', statsOffset: 0, unlockedUntil: 0,
+  statsRange: 'week', statsOffset: 0,
+  parentOpen: false, // true while Parent settings (or one of its sub-screens) is unlocked
 };
 
 function save() {
@@ -611,9 +612,12 @@ function openModal(type, data = {}) {
 }
 
 function closeModal() {
-  if (ui.modal?.type === 'parent') ui.unlockedUntil = 0; // leaving Parent settings locks it again
+  const type = ui.modal?.type;
   ui.modal = null;
   $('#modal-root').innerHTML = '';
+  if (!ui.parentOpen) return;
+  if (type === 'parent') lockParent();
+  else openModal('parent'); // finished a sub-screen (edit reader, change PIN…): back to Parent settings
 }
 
 function renderModal() {
@@ -772,7 +776,9 @@ const MODALS = {
   },
 
   parent() {
-    return `${head('Parent settings')}
+    const locked = !!state.settings.pinHash;
+    return `<div class="modal-head"><h2>Parent settings</h2>
+        <button class="btn btn-soft lock-btn" data-action="parent-lock">${locked ? '🔒 Lock' : 'Done'}</button></div>
       <div class="field"><span class="label">Readers</span>
         <div class="list">
           ${state.kids.map((k) => {
@@ -802,7 +808,9 @@ const MODALS = {
       <div class="field"><span class="label">Try it out</span>
         <button class="btn btn-soft btn-block" data-action="demo">🎲 Load demo readers</button>
       </div>
-      <button class="btn btn-danger btn-block" data-action="reset">Erase everything</button>`;
+      <button class="btn btn-danger btn-block" data-action="reset">Erase everything</button>
+      <button class="btn btn-primary btn-block" style="margin-top:12px" data-action="parent-lock">${locked ? '🔒 Lock & close settings' : 'Done'}</button>
+      ${locked ? `<p class="hint" style="text-align:center">Settings also lock on their own after ${PARENT_IDLE_MIN} minutes without a tap, or when the app is closed.</p>` : ''}`;
   },
 
   pin(m) {
@@ -867,7 +875,8 @@ function syncSectionHTML() {
 // ---------------------------------------------------------------------------
 // Parent PIN (a kid-proof lock, not real security: it lives in the family's own data)
 // ---------------------------------------------------------------------------
-const PIN_UNLOCK_MS = 3 * 60 * 1000;
+const PARENT_IDLE_MIN = 2;
+let parentIdleTimer = null;
 
 function pinHash(pin, salt) {
   let h = 2166136261;
@@ -875,17 +884,41 @@ function pinHash(pin, salt) {
   return (h >>> 0).toString(36);
 }
 
-/** Run fn now if there's no PIN (or it was entered recently), otherwise ask for it first. */
+/** Run fn now if there's no PIN, otherwise ask for it first. Each protected action asks again. */
 function requirePin(fn) {
-  if (!state.settings.pinHash || Date.now() < ui.unlockedUntil) return fn();
+  if (!state.settings.pinHash) return fn();
   openModal('pin', { mode: 'check', entry: '', then: fn });
 }
 
 function unlock(then) {
-  ui.unlockedUntil = Date.now() + PIN_UNLOCK_MS;
   closeModal();
   then?.();
 }
+
+function openParent() {
+  ui.parentOpen = true;
+  openModal('parent');
+  touchParent();
+}
+
+/** Leave Parent settings; the next visit needs the PIN again. */
+function lockParent(reason = '') {
+  const wasOpen = ui.parentOpen;
+  ui.parentOpen = false;
+  clearTimeout(parentIdleTimer);
+  if (ui.modal) { ui.modal = null; $('#modal-root').innerHTML = ''; }
+  if (wasOpen && state.settings.pinHash) toast('🔒', 'Parent settings locked', reason);
+}
+
+// Any tap or key press while unlocked restarts the idle countdown.
+function touchParent() {
+  if (!ui.parentOpen) return;
+  clearTimeout(parentIdleTimer);
+  if (state.settings.pinHash) {
+    parentIdleTimer = setTimeout(() => lockParent(`No taps for ${PARENT_IDLE_MIN} minutes`), PARENT_IDLE_MIN * 60 * 1000);
+  }
+}
+['pointerdown', 'keydown'].forEach((t) => document.addEventListener(t, touchParent, true));
 
 function pinKey(key) {
   const m = ui.modal;
@@ -902,9 +935,8 @@ function pinKey(key) {
   } else if (m.first === m.entry) {
     const salt = uid();
     state.settings = { ...state.settings, pinSalt: salt, pinHash: pinHash(m.entry, salt) };
-    ui.unlockedUntil = Date.now() + PIN_UNLOCK_MS;
     save();
-    toast('🔒', 'PIN saved', Sync.email ? 'It works on all your synced devices' : 'Parent settings are now locked');
+    toast('🔒', 'PIN saved', Sync.email ? 'It works on all your synced devices. Tap Lock when you\'re done.' : "Tap Lock when you're done");
     openModal('parent');
     return;
   } else {
@@ -1175,7 +1207,8 @@ const actions = {
   filter: (el) => { ui.bookFilter = el.dataset.filter; render(); },
   'switch-kid': () => { ui.picking = true; render(); },
   'choose-kid': (el) => { state.activeKidId = el.dataset.id; ui.picking = false; ui.tab = 'home'; save(); render(); },
-  parent: () => requirePin(() => openModal('parent')),
+  parent: () => requirePin(openParent),
+  'parent-lock': () => lockParent(),
   'add-kid': () => openModal('kid'),
   'edit-kid': (el) => openModal('kid', { id: el.dataset.id }),
   'delete-kid': () => {
@@ -1476,7 +1509,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Refresh "today" when the app comes back after midnight or from the background.
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); if (state.timer) renderTimer(); } });
+document.addEventListener('visibilitychange', () => {
+  // Switching away from the app locks Parent settings.
+  if (document.hidden) { if (ui.parentOpen) lockParent(); return; }
+  render();
+  if (state.timer) renderTimer();
+});
 
 Sync.init({
   get: () => state,

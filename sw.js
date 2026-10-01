@@ -1,5 +1,5 @@
 // Offline support: fetch fresh files when online, fall back to the cached copy when offline.
-const CACHE = 'reading-quest-v3';
+const CACHE = 'reading-quest-v4';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'sync.js', 'sync-config.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {

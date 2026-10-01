@@ -626,3 +626,4 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; lett
 /* Hold-to-repeat stepper buttons shouldn't select text or open the long-press menu. */
 .stepper button { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
 .hero-actions .btn { flex: 1 1 0; min-width: 0; padding-left: 12px; padding-right: 12px; }
+.modal-head .lock-btn { padding: 10px 16px; font-size: 15px; flex: none; }
