@@ -46,6 +46,15 @@ const hueOf = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.cha
 const weekStart = (d = new Date()) => addDays(new Date(d.getFullYear(), d.getMonth(), d.getDate()), -((d.getDay() + 6) % 7));
 const dailyGoalOf = (k) => k.dailyGoal || 20;
 const weeklyGoalOf = (k) => k.weeklyGoal || dailyGoalOf(k) * 5;
+const WEEKLY_PRESETS = [60, 90, 120, 150, 180, 240, 300];
+const WEEKLY_MIN = 10;
+const WEEKLY_MAX = 3000;
+/** "2h 15m a week: about 27 min a day if they read 5 days a week." */
+function weeklyHint(value) {
+  const m = Math.round(Number(value));
+  if (!(m >= WEEKLY_MIN && m <= WEEKLY_MAX)) return `Type a number of minutes between ${WEEKLY_MIN} and ${WEEKLY_MAX.toLocaleString()}.`;
+  return `${fmtMinutes(m)} a week: about <b>${Math.round(m / 5)} min a day</b> if they read 5 days a week (${Math.round(m / 7)} min if every day). Weeks run Monday to Sunday.`;
+}
 const fmtMinutes = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ''}`.trim() : `${m}m`);
 const fmtDate = (k) => {
   const today = dayKey();
@@ -639,7 +648,7 @@ const MODALS = {
   kid(m) {
     const k = m.id ? state.kids.find((x) => x.id === m.id) : null;
     const d = m.draft || (m.draft = { name: k?.name || '', avatar: k?.avatar || pick(AVATARS), color: k?.color || COLORS[state.kids.length % COLORS.length], dailyGoal: k?.dailyGoal || 20, weeklyGoal: k ? weeklyGoalOf(k) : 120 });
-    const weekly = [...new Set([60, 90, 120, 150, 180, 240, 300, d.weeklyGoal])].sort((a, b) => a - b);
+    if (d.weeklyCustom === undefined) d.weeklyCustom = !WEEKLY_PRESETS.includes(Number(d.weeklyGoal));
     return `${head(k ? 'Edit reader' : 'New reader')}
     <form data-form="kid">
       <div style="display:flex;justify-content:center;margin-bottom:16px"><span class="avatar lg pop" style="--kid:${esc(d.color)}">${esc(d.avatar)}</span></div>
@@ -654,8 +663,11 @@ const MODALS = {
         ${[10, 15, 20, 30, 45, 60].map((g) => `<button type="button" class="choice ${g === d.dailyGoal ? 'on' : ''}" data-action="draft" data-key="dailyGoal" data-val="${g}">${g} min</button>`).join('')}
       </div></div>
       <div class="field"><span class="label">Weekly reading goal</span><div class="choices">
-        ${weekly.map((g) => `<button type="button" class="choice ${g === d.weeklyGoal ? 'on' : ''}" data-action="draft" data-key="weeklyGoal" data-val="${g}">${fmtMinutes(g)}</button>`).join('')}
-      </div><div class="hint">About ${Math.round(d.weeklyGoal / 5)} min a day if they read 5 days a week. Weeks run Monday to Sunday.</div></div>
+        ${WEEKLY_PRESETS.map((g) => `<button type="button" class="choice ${!d.weeklyCustom && g === Number(d.weeklyGoal) ? 'on' : ''}" data-action="draft" data-key="weeklyGoal" data-val="${g}">${fmtMinutes(g)}</button>`).join('')}
+        <button type="button" class="choice ${d.weeklyCustom ? 'on' : ''}" data-action="draft" data-key="weeklyCustom" data-val="1">✏️ Custom</button>
+      </div>
+      ${d.weeklyCustom ? `<div class="custom-goal"><input id="kid-weekly" class="input" name="weeklyGoal" type="number" min="${WEEKLY_MIN}" max="${WEEKLY_MAX}" step="1" inputmode="numeric" required value="${esc(d.weeklyGoal)}" aria-label="Custom weekly goal in minutes" /><span>minutes a week</span></div>` : ''}
+      <div class="hint" id="weekly-hint">${weeklyHint(d.weeklyGoal)}</div></div>
       <div class="modal-foot">
         ${k ? '<button type="button" class="btn btn-danger" data-action="delete-kid">Remove</button>' : ''}
         <button class="btn btn-primary">${k ? 'Save' : "Let's read!"}</button>
@@ -1227,10 +1239,13 @@ const actions = {
     syncDraftFromForm();
     const v = el.dataset.val;
     m.draft[el.dataset.key] = ['dailyGoal', 'weeklyGoal'].includes(el.dataset.key) ? Number(v) : v;
+    if (el.dataset.key === 'weeklyGoal') m.draft.weeklyCustom = false;
+    if (el.dataset.key === 'weeklyCustom') m.draft.weeklyCustom = true;
     if (el.dataset.key === 'bookId') m.draft.page = '';
     const search = $('[data-search]')?.value;
     const results = $('#search-results')?.innerHTML;
     renderModal();
+    if (el.dataset.key === 'weeklyCustom') $('#kid-weekly')?.select();
     if (search != null && $('[data-search]')) { $('[data-search]').value = search; $('#search-results').innerHTML = results; }
   },
   // Mouse/touch presses are handled on pointerdown (with hold-to-repeat); this covers keyboard presses.
@@ -1426,6 +1441,7 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'kid-weekly') $('#weekly-hint').innerHTML = weeklyHint(e.target.value);
   if (e.target.matches('[data-search]')) onSearchInput(e.target.value);
   if (e.target.matches('#b-title, #b-author') && ui.modal?.draft) {
     syncDraftFromForm();
@@ -1452,6 +1468,8 @@ document.addEventListener('submit', (e) => {
   if (type === 'kid') {
     const name = (d.name || '').trim();
     if (!name) return;
+    d.weeklyGoal = Math.round(Number(d.weeklyGoal));
+    if (!(d.weeklyGoal >= WEEKLY_MIN && d.weeklyGoal <= WEEKLY_MAX)) { $('#kid-weekly')?.focus(); return; }
     const existing = state.kids.find((x) => x.id === ui.modal.id);
     if (existing) Object.assign(existing, { name, avatar: d.avatar, color: d.color, dailyGoal: d.dailyGoal, weeklyGoal: d.weeklyGoal });
     else {
