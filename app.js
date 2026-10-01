@@ -9,6 +9,9 @@ const STORE_KEY = 'reading-quest-v1';
 const AVATARS = ['🦊', '🐼', '🦄', '🐸', '🐯', '🐙', '🦖', '🐧', '🐨', '🦁', '🐰', '🚀', '🐶', '🐱', '🦋', '🐲', '🌟', '🧚'];
 const COLORS = ['#7c5cff', '#ff5c8a', '#ff8a3d', '#12b886', '#339af0', '#e64980', '#f59f00', '#15aabf'];
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const FORMATS = { print: ['📖', 'Physical book'], ebook: ['📱', 'Digital book'], audio: ['🎧', 'Audiobook'] };
+const formatChips = (current, key) => Object.entries(FORMATS).map(([id, [icon, label]]) =>
+  `<button type="button" class="choice ${current === id ? 'on' : ''}" data-action="draft" data-key="${key}" data-val="${id}">${icon} ${label}</button>`).join('');
 const CHEERS = ['Awesome!', 'Great job!', 'Super reader!', 'Way to go!', 'Fantastic!', 'You rock!', 'Brilliant!'];
 
 const ICONS = {
@@ -39,6 +42,10 @@ const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const hueOf = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+/** Monday of the week containing d (weeks run Monday to Sunday). */
+const weekStart = (d = new Date()) => addDays(new Date(d.getFullYear(), d.getMonth(), d.getDate()), -((d.getDay() + 6) % 7));
+const dailyGoalOf = (k) => k.dailyGoal || 20;
+const weeklyGoalOf = (k) => k.weeklyGoal || dailyGoalOf(k) * 5;
 const fmtMinutes = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ''}`.trim() : `${m}m`);
 const fmtDate = (k) => {
   const today = dayKey();
@@ -128,9 +135,12 @@ function statsFor(k) {
   const byDay = minutesByDay(k.id);
   const finished = books.filter((b) => b.status === 'finished');
   const weekendDays = new Set();
+  const byWeek = {};
   for (const d of Object.keys(byDay)) {
     const dt = parseKey(d);
     if (dt.getDay() === 6 && byDay[dayKey(addDays(dt, 1))]) weekendDays.add(d);
+    const wk = dayKey(weekStart(dt));
+    byWeek[wk] = (byWeek[wk] || 0) + byDay[d];
   }
   return {
     byDay,
@@ -142,9 +152,11 @@ function statsFor(k) {
     streak: currentStreak(byDay),
     bestStreak: bestStreak(byDay),
     maxDay: Math.max(0, ...Object.values(byDay)),
-    goalDays: Object.values(byDay).filter((m) => m >= (k.dailyGoal || 20)).length,
+    goalDays: Object.values(byDay).filter((m) => m >= dailyGoalOf(k)).length,
+    weeksGoalMet: Object.values(byWeek).filter((m) => m >= weeklyGoalOf(k)).length,
     weekends: weekendDays.size,
     today: byDay[dayKey()] || 0,
+    thisWeek: byWeek[dayKey(weekStart())] || 0,
   };
 }
 
@@ -154,6 +166,7 @@ function statsFor(k) {
 const BADGES = [
   { id: 'first-read', icon: '📖', name: 'First Page', desc: 'Log your first reading', stat: 'sessions', goal: 1 },
   { id: 'goal-1', icon: '🎯', name: 'Bullseye', desc: 'Hit your daily goal', stat: 'goalDays', goal: 1 },
+  { id: 'week-1', icon: '🏆', name: 'Week Winner', desc: 'Hit your weekly goal', stat: 'weeksGoalMet', goal: 1 },
   { id: 'streak-3', icon: '🔥', name: 'On Fire', desc: 'Read 3 days in a row', stat: 'bestStreak', goal: 3 },
   { id: 'first-book', icon: '🐛', name: 'Bookworm', desc: 'Finish your first book', stat: 'booksFinished', goal: 1 },
   { id: 'hour', icon: '⏰', name: 'Hour Power', desc: 'Read 60 minutes total', stat: 'minutes', goal: 60 },
@@ -164,10 +177,12 @@ const BADGES = [
   { id: 'pages-500', icon: '📚', name: 'Page Turner', desc: 'Read 500 pages', stat: 'pages', goal: 500 },
   { id: 'books-5', icon: '🦉', name: 'Wise Owl', desc: 'Finish 5 books', stat: 'booksFinished', goal: 5 },
   { id: 'goal-10', icon: '🏹', name: 'Sharpshooter', desc: 'Hit your goal on 10 days', stat: 'goalDays', goal: 10 },
+  { id: 'week-4', icon: '🗓️', name: 'Month of Wins', desc: 'Hit your weekly goal 4 times', stat: 'weeksGoalMet', goal: 4 },
   { id: 'hours-10', icon: '🚀', name: 'Rocket Reader', desc: 'Read 10 hours total', stat: 'minutes', goal: 600 },
   { id: 'books-10', icon: '🧙', name: 'Book Wizard', desc: 'Finish 10 books', stat: 'booksFinished', goal: 10 },
   { id: 'streak-30', icon: '👑', name: 'Reading Royalty', desc: 'Read 30 days in a row', stat: 'bestStreak', goal: 30 },
   { id: 'pages-2000', icon: '🏔️', name: 'Mountain of Pages', desc: 'Read 2,000 pages', stat: 'pages', goal: 2000 },
+  { id: 'week-12', icon: '🥇', name: 'Season Champ', desc: 'Hit your weekly goal 12 times', stat: 'weeksGoalMet', goal: 12 },
   { id: 'books-25', icon: '🐉', name: 'Legendary', desc: 'Finish 25 books', stat: 'booksFinished', goal: 25 },
   { id: 'hours-50', icon: '🌌', name: 'Galaxy Brain', desc: 'Read 50 hours total', stat: 'minutes', goal: 3000 },
 ];
@@ -189,7 +204,8 @@ function checkBadges(k) {
 // Rendering: covers & small parts
 // ---------------------------------------------------------------------------
 function coverHTML(b, extra = '') {
-  const done = b.status === 'finished' && extra !== 'plain' ? '<div class="done-badge">✓</div>' : '';
+  const done = (b.status === 'finished' && extra !== 'plain' ? '<div class="done-badge">✓</div>' : '')
+    + (b.format && b.format !== 'print' && FORMATS[b.format] ? `<div class="fmt-badge" title="${FORMATS[b.format][1]}">${FORMATS[b.format][0]}</div>` : '');
   const gen = `<div class="cover gen" style="--h:${b.hue ?? hueOf(b.title)}"><div class="t">${esc(b.title)}</div><div class="a">${esc(b.author || '')}</div>${done}</div>`;
   if (!b.coverUrl) return gen;
   // Swap in the generated cover if the image fails to load.
@@ -231,19 +247,30 @@ function barChart(items, { goal = 0, fmt = String, showValues = true } = {}) {
 }
 
 function weekHTML(k, byDay) {
+  const today = dayKey();
   const items = Array.from({ length: 7 }, (_, i) => {
-    const d = addDays(new Date(), i - 6);
-    const v = byDay[dayKey(d)] || 0;
-    return { label: DAY_LETTERS[d.getDay()], value: v, title: `${fmtDate(dayKey(d))}: ${v} min`, today: i === 6 };
+    const key = dayKey(addDays(weekStart(), i));
+    const v = byDay[key] || 0;
+    return { label: DAY_LETTERS[parseKey(key).getDay()], value: v, title: `${fmtDate(key)}: ${v} min`, today: key === today, future: key > today };
   });
-  return barChart(items, { goal: k.dailyGoal || 20 });
+  return barChart(items, { goal: dailyGoalOf(k) });
+}
+
+function weekGoalHTML(k, minutes, { light = false } = {}) {
+  const goal = weeklyGoalOf(k);
+  const pct = clamp((minutes / goal) * 100, 0, 100);
+  const done = minutes >= goal;
+  return `<div class="week-goal ${light ? 'light' : ''} ${done ? 'done' : ''}">
+    <div class="wg-top"><span>${done ? '🏆 Weekly goal done!' : 'Weekly goal'}</span><b>${fmtMinutes(minutes)} / ${fmtMinutes(goal)}</b></div>
+    <div class="wg-bar"><i style="width:${pct}%"></i></div>
+  </div>`;
 }
 
 function heatHTML(k, byDay) {
-  const goal = k.dailyGoal || 20;
+  const goal = dailyGoalOf(k);
   const weeks = 15;
   const today = new Date();
-  const start = addDays(today, -today.getDay() - (weeks - 1) * 7);
+  const start = addDays(weekStart(today), -(weeks - 1) * 7);
   const cells = [];
   for (let i = 0; i < weeks * 7; i++) {
     const d = addDays(start, i);
@@ -262,9 +289,10 @@ function heatHTML(k, byDay) {
     <div class="legend">Less <i style="background:var(--soft)"></i><i style="background:color-mix(in srgb,var(--accent) 30%,var(--soft))"></i><i style="background:color-mix(in srgb,var(--accent) 60%,var(--soft))"></i><i style="background:var(--accent)"></i><i style="background:var(--good)"></i> More</div>`;
 }
 
-function heroMessage(st, goal) {
+function heroMessage(st, goal, weekGoal) {
   if (st.today >= goal * 2) return 'Double goal! You are unstoppable! 🚀';
   if (st.today >= goal) return 'Goal smashed today! 🎉';
+  if (st.thisWeek >= weekGoal) return 'Weekly goal done! Extra reading is a bonus ⭐';
   if (st.today > 0) return `Only ${goal - st.today} more minutes to hit your goal!`;
   if (st.streak > 0) return `Keep your ${st.streak}-day streak going! 🔥`;
   return 'Ready for a reading adventure? 📚';
@@ -325,7 +353,7 @@ function pickerHTML() {
 }
 
 function homeHTML(k, st) {
-  const goal = k.dailyGoal || 20;
+  const goal = dailyGoalOf(k);
   const reading = kidBooks(k.id).filter((b) => b.status === 'reading');
   const recent = kidSessions(k.id).slice().sort((a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt)).slice(0, 4);
   return `
@@ -333,16 +361,17 @@ function homeHTML(k, st) {
       <div class="hero-row">
         ${ringHTML(st.today, goal)}
         <div class="hero-info">
-          <div class="msg">${esc(heroMessage(st, goal))}</div>
+          <div class="msg">${esc(heroMessage(st, goal, weeklyGoalOf(k)))}</div>
           <div class="pill-row">
             <span class="pill">🔥 ${plural(st.streak, 'day')}</span>
             <span class="pill">📚 ${st.booksFinished} read</span>
           </div>
         </div>
       </div>
+      ${weekGoalHTML(k, st.thisWeek, { light: true })}
       <div class="hero-actions">
-        <button class="btn btn-white" data-action="start-timer">${ICONS.play} Start reading</button>
-        <button class="btn btn-glass" data-action="log">${ICONS.plus} Log</button>
+        <button class="btn btn-white" data-action="start-timer">${ICONS.play} Start timer</button>
+        <button class="btn btn-white" data-action="log">${ICONS.plus} Log reading</button>
       </div>
     </section>
 
@@ -352,7 +381,7 @@ function homeHTML(k, st) {
       <button class="add-tile" data-action="add-book"><span class="plus">+</span>Add a book</button>
     </div>
 
-    <div class="section-title"><h2>This week</h2></div>
+    <div class="section-title"><h2>This week</h2><span class="muted">${fmtMinutes(st.thisWeek)} of ${fmtMinutes(weeklyGoalOf(k))}</span></div>
     <section class="card">${weekHTML(k, st.byDay)}</section>
 
     ${recent.length ? `<div class="section-title"><h2>Recent reading</h2><button class="link" data-action="tab" data-tab="stats">History</button></div>
@@ -423,7 +452,7 @@ function periodRange(range, offset) {
   const short = (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   let start, end, label, sub = '';
   if (range === 'week') {
-    start = addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -now.getDay() + offset * 7);
+    start = addDays(weekStart(now), offset * 7);
     end = addDays(start, 6);
     sub = `${short(start)} – ${short(end)}`;
     label = offset === 0 ? 'This week' : offset === -1 ? 'Last week' : sub;
@@ -443,7 +472,7 @@ function periodRange(range, offset) {
 }
 
 function periodStats(k, p) {
-  const goal = k.dailyGoal || 20;
+  const goal = dailyGoalOf(k);
   const sessions = kidSessions(k.id).filter((s) => s.date >= p.startKey && s.date <= p.endKey);
   const byDay = {};
   for (const s of sessions) byDay[s.date] = (byDay[s.date] || 0) + (s.minutes || 0);
@@ -456,8 +485,18 @@ function periodStats(k, p) {
     const d = dayKey(new Date(b.finishedAt));
     return d >= p.startKey && d <= p.endKey;
   });
+  // Weeks that start (on Monday) inside this period and have begun; a week is counted whole even if it spills over.
+  const allDays = minutesByDay(k.id);
+  let weeksSoFar = 0, weeksMet = 0;
+  for (let w = weekStart(parseKey(p.startKey)); dayKey(w) <= p.endKey && dayKey(w) <= todayKey; w = addDays(w, 7)) {
+    if (dayKey(w) < p.startKey) continue;
+    weeksSoFar++;
+    let m = 0;
+    for (let i = 0; i < 7; i++) m += allDays[dayKey(addDays(w, i))] || 0;
+    if (m >= weeklyGoalOf(k)) weeksMet++;
+  }
   return {
-    sessions, byDay, books, daysSoFar,
+    sessions, byDay, books, daysSoFar, weeksSoFar, weeksMet,
     minutes: sessions.reduce((a, s) => a + (s.minutes || 0), 0),
     pages: sessions.reduce((a, s) => a + (s.pages || 0), 0),
     daysRead: daily.length,
@@ -489,7 +528,7 @@ function periodChart(k, p, ps) {
     const label = p.range === 'week' ? DAY_LETTERS[d.getDay()] : d.getDate() === 1 || d.getDate() % 5 === 0 ? String(d.getDate()) : '';
     items.push({ label, value: v, today: key === today, future: key > today, title: `${fmtDate(key)}: ${v} min` });
   }
-  return { title: 'Minutes per day', html: barChart(items, { goal: k.dailyGoal || 20, showValues: p.range === 'week' }) };
+  return { title: 'Minutes per day', html: barChart(items, { goal: dailyGoalOf(k), showValues: p.range === 'week' }) };
 }
 
 function statsHTML(k, st) {
@@ -529,10 +568,12 @@ function statsHTML(k, st) {
       <div class="tile"><div class="ic">📚</div><div class="n">${ps.books.length}</div><div class="l">Books finished</div></div>
     </div>
     <section class="card">
+      ${ui.statsRange === 'week' ? weekGoalHTML(k, ps.minutes) : ''}
       <div class="chart-head"><h3>${chart.title}</h3>${delta}</div>
       ${chart.html}
       <div class="facts">
-        <span>🎯 Goal hit on <b>${plural(ps.goalDays, 'day')}</b></span>
+        <span>🎯 Daily goal hit on <b>${plural(ps.goalDays, 'day')}</b></span>
+        ${ui.statsRange !== 'week' && ps.weeksSoFar ? `<span>🏆 Weekly goal hit <b>${ps.weeksMet} of ${plural(ps.weeksSoFar, 'week')}</b></span>` : ''}
         <span>🏅 Best day <b>${fmtMinutes(ps.bestDay)}</b></span>
         <span>📈 Average <b>${fmtMinutes(ps.avg)}</b> a reading day</span>
       </div>
@@ -593,7 +634,8 @@ const head = (title) => `<div class="modal-head"><h2>${title}</h2><button class=
 const MODALS = {
   kid(m) {
     const k = m.id ? state.kids.find((x) => x.id === m.id) : null;
-    const d = m.draft || (m.draft = { name: k?.name || '', avatar: k?.avatar || pick(AVATARS), color: k?.color || COLORS[state.kids.length % COLORS.length], dailyGoal: k?.dailyGoal || 20 });
+    const d = m.draft || (m.draft = { name: k?.name || '', avatar: k?.avatar || pick(AVATARS), color: k?.color || COLORS[state.kids.length % COLORS.length], dailyGoal: k?.dailyGoal || 20, weeklyGoal: k ? weeklyGoalOf(k) : 120 });
+    const weekly = [...new Set([60, 90, 120, 150, 180, 240, 300, d.weeklyGoal])].sort((a, b) => a - b);
     return `${head(k ? 'Edit reader' : 'New reader')}
     <form data-form="kid">
       <div style="display:flex;justify-content:center;margin-bottom:16px"><span class="avatar lg pop" style="--kid:${esc(d.color)}">${esc(d.avatar)}</span></div>
@@ -607,6 +649,9 @@ const MODALS = {
       <div class="field"><span class="label">Daily reading goal</span><div class="choices">
         ${[10, 15, 20, 30, 45, 60].map((g) => `<button type="button" class="choice ${g === d.dailyGoal ? 'on' : ''}" data-action="draft" data-key="dailyGoal" data-val="${g}">${g} min</button>`).join('')}
       </div></div>
+      <div class="field"><span class="label">Weekly reading goal</span><div class="choices">
+        ${weekly.map((g) => `<button type="button" class="choice ${g === d.weeklyGoal ? 'on' : ''}" data-action="draft" data-key="weeklyGoal" data-val="${g}">${fmtMinutes(g)}</button>`).join('')}
+      </div><div class="hint">About ${Math.round(d.weeklyGoal / 5)} min a day if they read 5 days a week. Weeks run Monday to Sunday.</div></div>
       <div class="modal-foot">
         ${k ? '<button type="button" class="btn btn-danger" data-action="delete-kid">Remove</button>' : ''}
         <button class="btn btn-primary">${k ? 'Save' : "Let's read!"}</button>
@@ -616,7 +661,7 @@ const MODALS = {
 
   book(m) {
     const b = m.id ? bookById(m.id) : null;
-    const d = m.draft || (m.draft = { title: b?.title || '', author: b?.author || '', totalPages: b?.totalPages || '', coverUrl: b?.coverUrl || '', status: b?.status || m.status || 'reading' });
+    const d = m.draft || (m.draft = { title: b?.title || '', author: b?.author || '', totalPages: b?.totalPages || '', coverUrl: b?.coverUrl || '', status: b?.status || m.status || 'reading', format: b?.format || 'print' });
     const statuses = { reading: 'Reading now', want: 'Want to read', finished: 'Finished' };
     return `${head(b ? 'Edit book' : 'Add a book')}
     <form data-form="book">
@@ -630,7 +675,8 @@ const MODALS = {
           <div class="field"><label for="b-author">Author</label><input id="b-author" class="input" name="author" maxlength="80" value="${esc(d.author)}" /></div>
         </div>
       </div>
-      <div class="field"><label for="b-pages">Number of pages <span style="color:var(--ink-3)">(optional)</span></label><input id="b-pages" class="input" name="totalPages" type="number" min="1" max="5000" inputmode="numeric" value="${esc(d.totalPages)}" /></div>
+      <div class="field"><span class="label">What kind of book?</span><div class="choices">${formatChips(d.format, 'format')}</div></div>
+      ${d.format === 'audio' ? '' : `<div class="field"><label for="b-pages">Number of pages <span style="color:var(--ink-3)">(optional)</span></label><input id="b-pages" class="input" name="totalPages" type="number" min="1" max="5000" inputmode="numeric" value="${esc(d.totalPages)}" /></div>`}
       <div class="field"><span class="label">Shelf</span><div class="choices">
         ${Object.entries(statuses).map(([id, label]) => `<button type="button" class="choice ${d.status === id ? 'on' : ''}" data-action="draft" data-key="status" data-val="${id}">${label}</button>`).join('')}
       </div></div>
@@ -658,6 +704,7 @@ const MODALS = {
       <div style="min-width:0">
         <h2>${esc(b.title)}</h2>
         ${b.author ? `<div class="by">by ${esc(b.author)}</div>` : ''}
+        <div class="by fmt">${FORMATS[b.format || 'print'].join(' ')}</div>
         ${b.rating ? `<div class="stars-sm" style="font-size:18px">${'★'.repeat(b.rating)}${'☆'.repeat(5 - b.rating)}</div>` : ''}
         <div class="mini-stats">
           <div><small>Time</small>${fmtMinutes(minutes)}</div>
@@ -679,25 +726,31 @@ const MODALS = {
   log(m) {
     const k = kid();
     const reading = kidBooks(k.id).filter((b) => b.status === 'reading');
-    const d = m.draft || (m.draft = { bookId: m.bookId ?? reading[0]?.id ?? '', minutes: m.minutes || k.dailyGoal || 20, date: dayKey(), page: '' });
+    const d = m.draft || (m.draft = { bookId: m.bookId ?? reading[0]?.id ?? '', minutes: m.minutes || dailyGoalOf(k), date: dayKey(), page: '', newTitle: '', newFormat: 'print' });
     const b = bookById(d.bookId);
+    const otherTitles = kidBooks(k.id).filter((x) => x.status !== 'reading').map((x) => x.title);
     return `${head(m.fromTimer ? `${pick(CHEERS)} 🎉` : 'Log reading')}
     <form data-form="log">
       <div class="field"><span class="label">What did you read?</span><div class="choices">
         ${reading.map((rb) => `<button type="button" class="choice ${d.bookId === rb.id ? 'on' : ''}" data-action="draft" data-key="bookId" data-val="${rb.id}">${esc(rb.title)}</button>`).join('')}
         <button type="button" class="choice ${!d.bookId ? 'on' : ''}" data-action="draft" data-key="bookId" data-val="">✨ Something else</button>
       </div></div>
+      ${b ? '' : `<div class="field"><label for="log-title">Name of the book</label>
+        <input id="log-title" class="input" name="newTitle" required maxlength="120" list="log-titles" autocomplete="off" value="${esc(d.newTitle)}" placeholder="Type the title" />
+        <datalist id="log-titles">${otherTitles.map((t) => `<option value="${esc(t)}"></option>`).join('')}</datalist>
+        <div class="choices" style="margin-top:10px">${formatChips(d.newFormat, 'newFormat')}</div>
+        <div class="hint">It goes on your Reading shelf so you can track it.</div></div>`}
       <div class="field"><span class="label">How long?</span>
         <div class="stepper">
-          <button type="button" data-action="bump" data-by="-5" aria-label="5 minutes less">−</button>
+          <button type="button" data-action="bump" data-by="-1" aria-label="1 minute less">−</button>
           <div class="val"><input name="minutes" type="number" min="1" max="600" inputmode="numeric" value="${esc(d.minutes)}" aria-label="Minutes" /><small>minutes</small></div>
-          <button type="button" data-action="bump" data-by="5" aria-label="5 minutes more">+</button>
+          <button type="button" data-action="bump" data-by="1" aria-label="1 minute more">+</button>
         </div>
       </div>
-      ${b ? `<div class="field"><label for="log-page">What page are you on now?</label>
+      ${b && b.format !== 'audio' ? `<div class="field"><label for="log-page">What page are you on now?</label>
         <input id="log-page" class="input" name="page" type="number" min="0" ${b.totalPages ? `max="${b.totalPages}"` : ''} inputmode="numeric" value="${esc(d.page)}" placeholder="${b.currentPage ? `You were on page ${b.currentPage}` : 'Page number'}" />
-        ${b.totalPages ? `<div class="hint">This book has ${b.totalPages} pages.</div>` : ''}</div>
-        <label class="check"><input type="checkbox" name="finished" ${d.finished ? 'checked' : ''} /> I finished this book! 🏁</label>` : ''}
+        ${b.totalPages ? `<div class="hint">This book has ${b.totalPages} pages.</div>` : ''}</div>` : ''}
+      <label class="check"><input type="checkbox" name="finished" ${d.finished ? 'checked' : ''} /> I finished this book! 🏁</label>
       <div class="field" style="margin-top:16px"><label for="log-date">When?</label><input id="log-date" class="input" name="date" type="date" max="${dayKey()}" value="${esc(d.date)}" /></div>
       <div class="modal-foot"><button class="btn btn-primary">${ICONS.check} Save reading</button></div>
     </form>`;
@@ -725,7 +778,7 @@ const MODALS = {
           ${state.kids.map((k) => {
             const st = statsFor(k);
             return `<div class="list-item"><span class="avatar" style="--kid:${esc(k.color)};width:42px;height:42px;font-size:22px;border-radius:14px">${esc(k.avatar)}</span>
-            <div class="grow"><div class="t">${esc(k.name)}</div><div class="s">Goal ${k.dailyGoal || 20} min/day · ${st.booksFinished} books · ${fmtMinutes(st.minutes)}</div></div>
+            <div class="grow"><div class="t">${esc(k.name)}</div><div class="s">Goals ${dailyGoalOf(k)} min/day · ${fmtMinutes(weeklyGoalOf(k))}/week · ${st.booksFinished} books</div></div>
             <button class="btn btn-soft" style="padding:8px 14px" data-action="edit-kid" data-id="${k.id}">Edit</button></div>`;
           }).join('')}
         </div>
@@ -1004,9 +1057,26 @@ function commit() {
   if (k) checkBadges(k);
 }
 
-function addSession({ bookId, minutes, date, page, finished }) {
+/** Find this reader's book by title, or put a new one on their Reading shelf. */
+function findOrAddBook(k, title, format) {
+  const t = title.trim();
+  const same = kidBooks(k.id).find((b) => b.title.trim().toLowerCase() === t.toLowerCase());
+  if (same) {
+    if (same.status === 'want') same.status = 'reading';
+    return same;
+  }
+  const b = {
+    id: uid(), kidId: k.id, title: t, author: '', totalPages: null, coverUrl: '', format: format || 'print',
+    hue: hueOf(t), status: 'reading', rating: null, currentPage: 0, createdAt: new Date().toISOString(), finishedAt: null,
+  };
+  state.books.push(b);
+  return b;
+}
+
+function addSession({ bookId, newTitle, format, minutes, date, page, finished }) {
   const k = kid();
-  const b = bookById(bookId);
+  const b = bookById(bookId) || (newTitle ? findOrAddBook(k, newTitle, format) : null);
+  const before = statsFor(k);
   let pages = 0;
   if (b) {
     const prev = b.currentPage || 0;
@@ -1015,13 +1085,16 @@ function addSession({ bookId, minutes, date, page, finished }) {
     if (now != null && now > prev) { pages = now - prev; b.currentPage = now; }
   }
   state.sessions.push({ id: uid(), kidId: k.id, bookId: b ? b.id : null, date, minutes, pages, createdAt: new Date().toISOString() });
-  const before = statsFor(k).today;
   commit();
-  const after = statsFor(k).today;
-  const goal = k.dailyGoal || 20;
-  if (date === dayKey() && before < goal && after >= goal) {
+  const after = statsFor(k);
+  const goal = dailyGoalOf(k);
+  const weekGoal = weeklyGoalOf(k);
+  if (before.thisWeek < weekGoal && after.thisWeek >= weekGoal) {
     confetti();
-    toast('🎯', 'Daily goal reached!', `${after} minutes today. ${pick(CHEERS)}`);
+    toast('🏆', 'Weekly goal reached!', `${fmtMinutes(after.thisWeek)} this week. ${pick(CHEERS)}`);
+  } else if (date === dayKey() && before.today < goal && after.today >= goal) {
+    confetti();
+    toast('🎯', 'Daily goal reached!', `${after.today} minutes today. ${pick(CHEERS)}`);
   } else {
     toast('📖', pick(CHEERS), `${fmtMinutes(minutes)} of reading logged`);
   }
@@ -1029,7 +1102,7 @@ function addSession({ bookId, minutes, date, page, finished }) {
 }
 
 function loadDemo() {
-  const mk = (name, avatar, color, dailyGoal) => ({ id: uid(), name, avatar, color, dailyGoal, badges: {}, createdAt: new Date().toISOString() });
+  const mk = (name, avatar, color, dailyGoal) => ({ id: uid(), name, avatar, color, dailyGoal, weeklyGoal: dailyGoal * 5, badges: {}, createdAt: new Date().toISOString() });
   const a = mk('Maya', '🦄', '#7c5cff', 20);
   const b = mk('Leo', '🦖', '#12b886', 15);
   const books = [
@@ -1120,17 +1193,15 @@ const actions = {
     const m = ui.modal;
     syncDraftFromForm();
     const v = el.dataset.val;
-    m.draft[el.dataset.key] = el.dataset.key === 'dailyGoal' ? Number(v) : v;
+    m.draft[el.dataset.key] = ['dailyGoal', 'weeklyGoal'].includes(el.dataset.key) ? Number(v) : v;
     if (el.dataset.key === 'bookId') m.draft.page = '';
     const search = $('[data-search]')?.value;
     const results = $('#search-results')?.innerHTML;
     renderModal();
     if (search != null && $('[data-search]')) { $('[data-search]').value = search; $('#search-results').innerHTML = results; }
   },
-  bump: (el) => {
-    const input = $('input[name="minutes"]');
-    input.value = clamp((Number(input.value) || 0) + Number(el.dataset.by), 1, 600);
-  },
+  // Mouse/touch presses are handled on pointerdown (with hold-to-repeat); this covers keyboard presses.
+  bump: (el, e) => { if (e.detail === 0) bump(el); },
   'add-book': (el) => openModal('book', { status: el.dataset.status || 'reading' }),
   'edit-book': (el) => openModal('book', { id: el.dataset.id }),
   'open-book': (el) => openModal('bookDetail', { id: el.dataset.id }),
@@ -1283,6 +1354,26 @@ async function syncAuth(method, form) {
   }
 }
 
+function bump(el) {
+  const input = $('input[name="minutes"]');
+  input.value = clamp((Number(input.value) || 0) + Number(el.dataset.by), 1, 600);
+}
+
+// Holding + or − keeps counting, getting faster the longer it's held.
+let bumpTimer = null;
+function stopBump() { clearTimeout(bumpTimer); bumpTimer = null; }
+document.addEventListener('pointerdown', (e) => {
+  const el = e.target.closest('[data-action="bump"]');
+  if (!el) return;
+  e.preventDefault();
+  bump(el);
+  let delay = 400;
+  const repeat = () => { bump(el); delay = Math.max(40, delay * 0.8); bumpTimer = setTimeout(repeat, delay); };
+  stopBump();
+  bumpTimer = setTimeout(repeat, delay);
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => document.addEventListener(t, stopBump, true));
+
 /** Keep typed values when a modal re-renders (e.g. after tapping a choice chip). */
 function syncDraftFromForm() {
   const form = $('#modal-root form');
@@ -1329,9 +1420,9 @@ document.addEventListener('submit', (e) => {
     const name = (d.name || '').trim();
     if (!name) return;
     const existing = state.kids.find((x) => x.id === ui.modal.id);
-    if (existing) Object.assign(existing, { name, avatar: d.avatar, color: d.color, dailyGoal: d.dailyGoal });
+    if (existing) Object.assign(existing, { name, avatar: d.avatar, color: d.color, dailyGoal: d.dailyGoal, weeklyGoal: d.weeklyGoal });
     else {
-      const k = { id: uid(), name, avatar: d.avatar, color: d.color, dailyGoal: d.dailyGoal, badges: {}, createdAt: new Date().toISOString() };
+      const k = { id: uid(), name, avatar: d.avatar, color: d.color, dailyGoal: d.dailyGoal, weeklyGoal: d.weeklyGoal, badges: {}, createdAt: new Date().toISOString() };
       state.kids.push(k);
       state.activeKidId = k.id;
       ui.picking = false;
@@ -1344,17 +1435,18 @@ document.addEventListener('submit', (e) => {
   if (type === 'book') {
     const title = d.title.trim();
     if (!title) return;
-    const totalPages = Number(d.totalPages) > 0 ? Math.round(Number(d.totalPages)) : null;
+    const format = FORMATS[d.format] ? d.format : 'print';
+    const totalPages = format !== 'audio' && Number(d.totalPages) > 0 ? Math.round(Number(d.totalPages)) : null;
     const existing = bookById(ui.modal.id);
     if (existing) {
-      Object.assign(existing, { title, author: d.author.trim(), totalPages, status: d.status });
+      Object.assign(existing, { title, author: d.author.trim(), totalPages, format, status: d.status });
       if (d.status === 'finished') existing.finishedAt = existing.finishedAt || new Date().toISOString();
       closeModal();
       commit();
       return;
     }
     const b = {
-      id: uid(), kidId: kid().id, title, author: d.author.trim(), totalPages, coverUrl: d.coverUrl || '',
+      id: uid(), kidId: kid().id, title, author: d.author.trim(), totalPages, format, coverUrl: d.coverUrl || '',
       hue: hueOf(title), status: d.status, rating: null, currentPage: d.status === 'finished' ? totalPages || 0 : 0,
       createdAt: new Date().toISOString(), finishedAt: d.status === 'finished' ? new Date().toISOString() : null,
     };
@@ -1369,7 +1461,9 @@ document.addEventListener('submit', (e) => {
   if (type === 'log') {
     const minutes = clamp(Math.round(Number(d.minutes) || 0), 1, 600);
     const date = d.date && d.date <= dayKey() ? d.date : dayKey();
-    const entry = { bookId: d.bookId || null, minutes, date, page: d.page, finished: !!d.finished };
+    const newTitle = d.bookId ? '' : (d.newTitle || '').trim();
+    if (!d.bookId && !newTitle) { $('#log-title')?.focus(); return; }
+    const entry = { bookId: d.bookId || null, newTitle, format: d.newFormat, minutes, date, page: d.page, finished: !!d.finished };
     closeModal();
     addSession(entry);
   }

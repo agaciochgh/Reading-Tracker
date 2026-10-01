@@ -4,10 +4,11 @@ A cheerful reading tracker for kids. One profile per reader, with daily goals, s
 
 ## Features
 
-- **Who's reading?** Each kid gets a profile with their own avatar, favourite colour and daily minutes goal.
-- **Home:** a goal ring for today, the current streak, the books they're reading now, and a chart of the week.
+- **Who's reading?** Each kid gets a profile with their own avatar, favourite colour, a daily minutes goal and a weekly goal (so they don't need to read every day). Weeks run Monday to Sunday.
+- **Home:** a goal ring for today, weekly goal progress, the current streak, the books they're reading now, and a Mon–Sun chart of the week.
 - **Reading timer:** a full-screen timer with pause and resume. It survives a page refresh and throws confetti when the daily goal is reached.
-- **Log reading:** minutes, the book, and "what page are you on now?" Pages read are worked out from that.
+- **Log reading:** minutes (±1, or hold to count faster), the book, and "what page are you on now?" Pages read are worked out from that. For "Something else" they type the title, and it goes on their Reading shelf.
+- **Book types:** physical, digital or audiobook. Audiobooks skip the page questions.
 - **Bookshelf:** Reading / Wishlist / Finished. Book search uses Open Library for titles, authors, page counts and covers. If there's no network, or no cover, the book gets a colourful generated cover instead.
 - **Finish a book:** rate it with stars, then confetti.
 - **18 badges:** streaks, total time, pages, books finished, weekend reading and more, each with a progress bar.

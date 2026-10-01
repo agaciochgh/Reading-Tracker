@@ -596,3 +596,33 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; lett
 .sync-chip { font-weight: 800; }
 .sync-chip.ok { color: #0c8a66; }
 .sync-chip.err { color: var(--danger); }
+
+/* ---------- Weekly goal ---------- */
+.week-goal { margin-bottom: 18px; }
+.hero .week-goal { margin: 18px 0 0; position: relative; z-index: 1; }
+.week-goal .wg-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-weight: 800; font-size: 14px; margin-bottom: 6px; color: var(--ink-2); }
+.week-goal .wg-top b { color: var(--ink); }
+.week-goal .wg-bar { height: 12px; border-radius: 99px; background: var(--soft); overflow: hidden; }
+.week-goal .wg-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #ff6b8b)); transition: width .8s cubic-bezier(.2, .8, .2, 1); }
+.week-goal.done .wg-bar i { background: linear-gradient(90deg, #63e6be, var(--good)); }
+.week-goal.light .wg-top, .week-goal.light .wg-top b { color: #fff; }
+.week-goal.light .wg-bar { background: rgba(255, 255, 255, .25); }
+.week-goal.light .wg-bar i { background: #fff; }
+.week-goal.light.done .wg-bar i { background: #b2f2bb; }
+.section-title .muted { color: var(--ink-3); font-weight: 800; font-size: 14px; }
+
+/* ---------- Book format ---------- */
+.fmt-badge {
+  position: absolute; top: 6px; right: 6px;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 14px;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+}
+.cover.gen:has(.fmt-badge) .t { padding-right: 22px; }
+.result .thumb .fmt-badge, .timer .tb .fmt-badge { display: none; }
+.book-detail .by.fmt { font-size: 14px; color: var(--ink-3); }
+
+/* Hold-to-repeat stepper buttons shouldn't select text or open the long-press menu. */
+.stepper button { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+.hero-actions .btn { flex: 1 1 0; min-width: 0; padding-left: 12px; padding-right: 12px; }
